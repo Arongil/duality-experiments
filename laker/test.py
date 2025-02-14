@@ -154,20 +154,20 @@ def plot_learning_dynamics(config, feature_learning, weight_norms, title_prefix=
 config = Config(
     width = 32,
     depth = 4,
-    linear = False,
-    residual = True,
-    lipschitz_constant = 4,
+    linear = False,             # whether to use any nonlinearity
+    residual = True,            # whether to use residual connections
+    lipschitz_constant = 4,     # final multiplicative factor
     lr = 0.01,
     steps = 200,
-    report_steps = 20,
+    report_steps = 20,          # how often to log progress
     weight_decay = 0.00,
-    adam = True,
-    momentum = 0.9,
-    momentum2 = 0.99,
-    dualize_pre = False,
-    dualize_post = False,
-    project = True,
-    ortho_backwards = False,
+    adam = True,                # transform using Adam moments (won't actually be Adam unless dualize_pre = dualize_post = False)
+    momentum = 0.9,             # coefficient for first moment buffer
+    momentum2 = 0.99,           # coefficient for second moment buffer
+    dualize_pre = False,        # dualize gradient before inserting into momentum buffers
+    dualize_post = False,       # dualize momentum buffers to create the final weight update
+    project = True,             # project weights to be orthogonal after every step
+    ortho_backwards = False,    # pretend like the weights are orthogonal in backprop
     make_learning_dynamics_plots = False,
 )
 
