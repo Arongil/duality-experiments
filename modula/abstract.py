@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+import copy
 
 class Module:
     def __init__(self):
@@ -61,6 +62,10 @@ class Module:
 
     def __rmul__(self, scalar):
         return Mul(scalar) @ self
+
+    def __pow__(self, n):
+        assert n >= 0 and n % 1 == 0, "nonnegative integer powers only"
+        return copy.deepcopy(self) @ (self ** (n-1)) if n > 0 else Identity()
 
     def __call__(self, x, w):
         return self.forward(x, w)
@@ -181,14 +186,14 @@ class TupleModule(Module):
         w = []
         for m in self.children:
             key, subkey = jax.random.split(key)
-            w.append(m.initialize(subkey))
+            w += m.initialize(subkey)
         return w
 
     def project(self, w):
         projected_w = []
         for m in self.children:
             projected_w_m = m.project(w[:m.atoms])
-            projected_w.append(projected_w_m)
+            projected_w += projected_w_m
             w = w[m.atoms:]
         return projected_w
 
