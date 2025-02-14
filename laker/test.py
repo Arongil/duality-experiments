@@ -43,7 +43,7 @@ def create_mlp(config: Config):
     embed = Linear(width, input_dim, **kwargs)
     block = Linear(width, width, **kwargs) @ nonlinearity
     if residual:
-        block = Identity() + block @ Linear(width, width, **kwargs)
+        block = (1 - 1/(2*depth)) * Identity() + (1/(2*depth)) * (block @ Linear(width, width, **kwargs))
     unembed = Linear(output_dim, width, **kwargs)
     lipschitz = Mul(lipschitz_constant)
     mlp = lipschitz @ unembed @ block ** depth @ embed
@@ -155,10 +155,10 @@ def plot_learning_dynamics(config, feature_learning, weight_norms, title_prefix=
 
 config = Config(
     width = 32,
-    depth = 4,
+    depth = 64,
     linear = False,             # whether to use any nonlinearity
-    residual = False,           # whether to use residual connections
-    residual_init = True,       # simulates residual connection via initialization I + W (best used separately from residual = True)
+    residual = True,            # whether to use residual connections
+    residual_init = False,      # simulates residual connection via initialization I + W (best used separately from residual = True)
     lipschitz_constant = 4,     # final multiplicative factor
     lr = 0.01,
     steps = 200,
@@ -167,14 +167,14 @@ config = Config(
     adam = True,                # transform using Adam moments (won't actually be Adam unless dualize_pre = dualize_post = False)
     momentum = 0.9,             # coefficient for first moment buffer
     momentum2 = 0.99,           # coefficient for second moment buffer
-    dualize_pre = False,        # dualize gradient before inserting into momentum buffers
+    dualize_pre = True,         # dualize gradient before inserting into momentum buffers
     dualize_post = False,       # dualize momentum buffers to create the final weight update
-    project = True,             # project weights to be orthogonal after every step
+    project = False,            # project weights to be orthogonal after every step
     ortho_backwards = False,    # pretend like the weights are orthogonal in backprop
     make_learning_dynamics_plots = False,
 )
 
-lrs = jnp.logspace(-2.5, 0.5, 10)
+lrs = jnp.logspace(-4, 0, 12)
 final_losses = []
 
 for lr in lrs:
@@ -192,7 +192,7 @@ for lr in lrs:
 plt.figure(figsize=(10, 6))
 plt.semilogx(lrs, final_losses, '-o')
 plt.yscale('log')
-plt.ylim(1e-3, 1e0)
+plt.ylim(1e-4, 1e0)
 plt.xlabel('Learning Rate')
 plt.ylabel('Final Training Loss')
 plt.title('Loss by Learning Rate')
