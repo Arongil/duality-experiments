@@ -24,12 +24,15 @@ class Config:
     steps: int
     report_steps: int
     weight_decay: float
+    adam: bool
     momentum: float
+    momentum2: float
     lipschitz_constant: float
     dualize_pre: bool
     dualize_post: bool
     project: bool
     ortho_backwards: bool
+    make_learning_dynamics_plots: bool
 
 def create_mlp(config: Config):
     width, depth, linear, ortho_backwards, lipschitz_constant = config.width, config.depth, config.linear, config.ortho_backwards, config.lipschitz_constant
@@ -55,7 +58,9 @@ def train(config):
     steps = config.steps
     report_steps = config.report_steps
     weight_decay = config.weight_decay
+    adam = config.adam
     momentum = config.momentum
+    momentum2 = config.momentum2
     dualize_pre = config.dualize_pre
     dualize_post = config.dualize_post
     project = config.project
@@ -67,14 +72,19 @@ def train(config):
     print(f"Training with lr {lr:.4f} for {steps} steps")
 
     m = [0 * weight for weight in w]
+    m2 = [0 * weight for weight in w]
     for step in range(steps):
         outputs, activations = mlp(inputs, w)
         loss = error(outputs, targets)
         error_grad = error.grad(outputs, targets)
         grad_w, _ = mlp.backward(w, activations, error_grad)
+
+        # pre_dualize, update first moment, update second moment, possibly apply adam, post_dualize
         d_m = mlp.dualize(grad_w) if dualize_pre else grad_w
         m = [momentum * m + (1-momentum) * d_m for m, d_m in zip(m, d_m)]
-        d_w = mlp.dualize(m) if dualize_post else m
+        m2 = [momentum2 * m2 + (1-momentum2) * d_m**2 for m2, d_m in zip(m2, d_m)]
+        d_w = [m / (jnp.sqrt(m2) + 1e-8) if adam else m for m, m2 in zip(m, m2)]
+        d_w = mlp.dualize(d_w) if dualize_post else d_w
         w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
 
         if weight_decay > 0:
@@ -143,21 +153,24 @@ def plot_learning_dynamics(config, feature_learning, weight_norms, title_prefix=
 
 config = Config(
     width = 32,
-    depth = 32,
+    depth = 4,
     linear = False,
     lipschitz_constant = 4,
     lr = 0.01,
     steps = 200,
     report_steps = 20,
     weight_decay = 0.00,
-    momentum = 0.75,
+    adam = True,
+    momentum = 0.9,
+    momentum2 = 0.99,
     dualize_pre = False,
-    dualize_post = True,
-    project = False,
+    dualize_post = False,
+    project = True,
     ortho_backwards = False,
+    make_learning_dynamics_plots = False,
 )
 
-lrs = jnp.logspace(-2, 0, 3)
+lrs = jnp.logspace(-3.5, 0.5, 10)
 final_losses = []
 
 for lr in lrs:
@@ -166,9 +179,10 @@ for lr in lrs:
     final_losses.append(losses[-1])
     
     # Save animation for this learning rate
-    anim = plot_learning_dynamics(config, fl, wn, title_prefix=f"LR={lr:.1e} ")
-    anim.save(f'laker/plots/learning_dynamics_lr_{lr:.1e}.gif', writer='pillow')
-    plt.close()
+    if config.make_learning_dynamics_plots:
+        anim = plot_learning_dynamics(config, fl, wn, title_prefix=f"LR={lr:.1e} ")
+        anim.save(f'laker/plots/learning_dynamics_lr_{lr:.1e}.gif', writer='pillow')
+        plt.close()
 
 # Plot learning rate sweep results
 plt.figure(figsize=(10, 6))
