@@ -26,16 +26,24 @@ class Linear(Atom):
         self.smooth = True
         self.mass = 1
         self.sensitivity = 1
+        self.scale = (self.fanout / self.fanin) ** 0.5
 
     def forward(self, x, w):
         weights = w[0]
-        return weights @ x, [x]
+        return weights @ x, [x] #* self.scale, [x]
 
     def backward(self, w, acts, grad_output):
         weights = w[0]
         input = acts[0]
+        # idea 1: renormalize grad_input every time to be unit vector (it'll be dualized away anyway -- just to prevent gradients from deviating from unit norm)
+        # idea 2: pretend like this linear layer is orthogonal when flowing gradient backwards
+        #grad_input = self.project([weights.T])[0] @ grad_output
         grad_input = weights.T @ grad_output
         grad_weight = grad_output @ input.T
+        #print(f"grad_output: {grad_output.shape}")
+        #print(f"weights: {weights.shape}, input: {input.shape}")
+        #print(f"grad_weight: {grad_weight.shape} with avg norm {jnp.mean(jnp.linalg.norm(grad_weight)).item()}")
+        #print(f"grad_input: {grad_input.shape} with avg norm {jnp.mean(jnp.linalg.norm(grad_input)).item()}")
         return [grad_weight], grad_input
 
     def initialize(self, key):

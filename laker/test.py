@@ -1,8 +1,6 @@
 import jax
 import jax.numpy as jnp
 
-import utils
-
 input_dim = 64
 output_dim = 16
 batch_size = 128
@@ -11,16 +9,24 @@ key = jax.random.PRNGKey(0)
 inputs = jax.random.normal(key, (input_dim, batch_size))
 targets = jax.random.normal(key, (output_dim, batch_size))
 
+from modula.abstract import Identity, Mul
 from modula.atom import Linear
 from modula.bond import ReLU
 
 width = 32
-depth = 8
+depth = 4
+lipschitz_constant = 4
+
+linear = False
 
 mlp = Linear(output_dim, width)
 for _ in range(depth):
-    mlp @= Linear(width, width)
+    if linear:
+        mlp @= Linear(width, width)
+    else:
+        mlp @= Linear(width, width) @ ReLU()
 mlp @= Linear(width, input_dim)
+mlp @= Mul(lipschitz_constant)
 
 print(mlp)
 
@@ -30,10 +36,13 @@ from modula.error import SquareError
 
 error = SquareError()
 
-steps = 1000
-learning_rate = 0.01
+from modula.atom import orthogonalize
 
-report_steps = 100
+steps = 200
+learning_rate = 0.5 / lipschitz_constant
+weight_decay = 0.00
+
+report_steps = 20
 feature_learning = []
 weight_norms = []
 
@@ -58,15 +67,24 @@ for step in range(steps):
 
     # compute scheduled learning rate
     lr = learning_rate# * (1 - step / steps)
+
+    # weight decay
+    # w = [weight * (1 - lr * weight_decay) for weight in w]
     
     # update weights
     w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
 
+    # orthogonalize weights
+    w = mlp.project(w)
+
     if step % report_steps == 0:
         print(f"Step {step:3d} \t Loss {loss:.6f}")
-        feature_learning.append([jnp.linalg.norm(d) for d in d_w])
-        singular_values = [jnp.linalg.svd(wi, compute_uv=False) for wi in w]
-        weight_norms.append([(s[0], s[-1]) for s in singular_values])
+        #singular_values_d_w = [jnp.linalg.svd(d_weight, compute_uv=False) for d_weight in grad_w]
+        grad_norms = [jnp.linalg.norm(d_weight) for d_weight in grad_w]
+        feature_learning.append(grad_norms)
+        #feature_learning.append([s[0] for s in singular_values_d_w])
+        singular_values_w = [jnp.linalg.svd(wi, compute_uv=False) for wi in w]
+        weight_norms.append([(s[0], s[-1]) for s in singular_values_w])
 
 import matplotlib.pyplot as plt
 
@@ -101,7 +119,7 @@ def update(frame):
     ax2.tick_params(axis='y', labelcolor='red')
     ax2.yaxis.set_label_position('right')
     
-    plt.title(f'Learning Dynamics at Step {frame * report_steps}')
+    plt.title(f'Learning Dynamics at Step {frame * report_steps}\n{"Linear" if linear else "ReLU"} Network, width {width}, depth {depth}')
     ax1.grid(True)
     
     # Set consistent y-axis scales

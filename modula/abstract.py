@@ -1,4 +1,5 @@
 import jax
+import jax.numpy as jnp
 
 class Module:
     def __init__(self):
@@ -124,7 +125,13 @@ class CompositeModule(Module):
         acts1 = acts[m0.atoms+m0.bonds:]
 
         grad_w1, grad_input1 = m1.backward(w1, acts1, grad_output)
+        #grad_input1 /= jnp.linalg.norm(grad_input1)
         grad_w0, grad_input0 = m0.backward(w0, acts0, grad_input1)
+        #grad_input0 /= jnp.linalg.norm(grad_input0)
+        #print("~~~")
+        #print(f"grad_input0: {grad_input0.shape} with avg norm {jnp.mean(jnp.linalg.norm(grad_input0)).item()}")
+        #print(f"grad_input1: {grad_input1.shape} with avg norm {jnp.mean(jnp.linalg.norm(grad_input1)).item()}")
+        #print("~~~")
 
         return grad_w0 + grad_w1, grad_input0
 
