@@ -19,7 +19,7 @@ def orthogonalize(M):
 
 
 class Linear(Atom):
-    def __init__(self, fanout, fanin, ortho_backwards=False):
+    def __init__(self, fanout, fanin, ortho_backwards=False, residual_init=False):
         super().__init__()
         self.fanin  = fanin
         self.fanout = fanout
@@ -28,6 +28,7 @@ class Linear(Atom):
         self.sensitivity = 1
         self.scale = (self.fanout / self.fanin) ** 0.5
         self.ortho_backwards = ortho_backwards
+        self.residual_init = residual_init
 
     def forward(self, x, w):
         weights = w[0]
@@ -51,7 +52,10 @@ class Linear(Atom):
 
     def initialize(self, key):
         weight = jax.random.normal(key, shape=(self.fanout, self.fanin))
-        return self.project([weight])
+        projected = self.project([weight])[0]
+        if self.residual_init and self.fanout == self.fanin:
+            projected = projected + jnp.eye(*projected.shape)  # simulate residual connection via initialization
+        return [projected]
 
     def project(self, w):
         weight = w[0]

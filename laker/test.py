@@ -21,6 +21,8 @@ class Config:
     depth: int
     linear: bool
     residual: bool
+    residual_init: bool
+    lipschitz_constant: float
     lr: float
     steps: int
     report_steps: int
@@ -28,7 +30,6 @@ class Config:
     adam: bool
     momentum: float
     momentum2: float
-    lipschitz_constant: float
     dualize_pre: bool
     dualize_post: bool
     project: bool
@@ -36,13 +37,14 @@ class Config:
     make_learning_dynamics_plots: bool
 
 def create_mlp(config: Config):
-    width, depth, residual, linear, ortho_backwards, lipschitz_constant = config.width, config.depth, config.residual, config.linear, config.ortho_backwards, config.lipschitz_constant
+    width, depth, residual, linear, ortho_backwards, lipschitz_constant, residual_init = config.width, config.depth, config.residual, config.linear, config.ortho_backwards, config.lipschitz_constant, config.residual_init
+    kwargs = {"ortho_backwards": ortho_backwards, "residual_init": residual_init}
     nonlinearity = Identity() if linear else ReLU()
-    embed = Linear(width, input_dim, ortho_backwards=ortho_backwards)
-    block = Linear(width, width, ortho_backwards=ortho_backwards) @ nonlinearity
+    embed = Linear(width, input_dim, **kwargs)
+    block = Linear(width, width, **kwargs) @ nonlinearity
     if residual:
-        block = Identity() + block @ Linear(width, width, ortho_backwards=ortho_backwards)
-    unembed = Linear(output_dim, width, ortho_backwards=ortho_backwards)
+        block = Identity() + block @ Linear(width, width, **kwargs)
+    unembed = Linear(output_dim, width, **kwargs)
     lipschitz = Mul(lipschitz_constant)
     mlp = lipschitz @ unembed @ block ** depth @ embed
     mlp.jit()
@@ -155,7 +157,8 @@ config = Config(
     width = 32,
     depth = 4,
     linear = False,             # whether to use any nonlinearity
-    residual = True,            # whether to use residual connections
+    residual = False,           # whether to use residual connections
+    residual_init = True,       # simulates residual connection via initialization I + W (best used separately from residual = True)
     lipschitz_constant = 4,     # final multiplicative factor
     lr = 0.01,
     steps = 200,
@@ -171,7 +174,7 @@ config = Config(
     make_learning_dynamics_plots = False,
 )
 
-lrs = jnp.logspace(-3.5, 0.5, 10)
+lrs = jnp.logspace(-2.5, 0.5, 10)
 final_losses = []
 
 for lr in lrs:
