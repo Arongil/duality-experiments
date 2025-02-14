@@ -4,6 +4,10 @@
   <img alt="modula logo" src="assets/modula.svg">
 </picture>
 
+# This is an experimental fork of Modula
+
+Everything below this point is part of the original readme:
+
 I'm currently in the process of overhauling this repository. More updates soon.
 
 You can install modula via `pip install git+https://github.com/modula-systems/modula.git`
