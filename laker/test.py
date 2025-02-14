@@ -20,6 +20,7 @@ class Config:
     width: int
     depth: int
     linear: bool
+    residual: bool
     lr: float
     steps: int
     report_steps: int
@@ -35,18 +36,17 @@ class Config:
     make_learning_dynamics_plots: bool
 
 def create_mlp(config: Config):
-    width, depth, linear, ortho_backwards, lipschitz_constant = config.width, config.depth, config.linear, config.ortho_backwards, config.lipschitz_constant
-    mlp = Linear(output_dim, width, ortho_backwards=ortho_backwards)
-    for _ in range(depth):
-        if linear:
-            mlp @= Linear(width, width, ortho_backwards=ortho_backwards)
-        else:
-            mlp @= Linear(width, width, ortho_backwards=ortho_backwards) @ ReLU()
-    mlp @= Linear(width, input_dim, ortho_backwards=ortho_backwards)
-    mlp @= Mul(lipschitz_constant)
+    width, depth, residual, linear, ortho_backwards, lipschitz_constant = config.width, config.depth, config.residual, config.linear, config.ortho_backwards, config.lipschitz_constant
+    nonlinearity = Identity() if linear else ReLU()
+    embed = Linear(width, input_dim, ortho_backwards=ortho_backwards)
+    block = Linear(width, width, ortho_backwards=ortho_backwards) @ nonlinearity
+    if residual:
+        block = Identity() + block @ Linear(width, width, ortho_backwards=ortho_backwards)
+    unembed = Linear(output_dim, width, ortho_backwards=ortho_backwards)
+    lipschitz = Mul(lipschitz_constant)
+    mlp = lipschitz @ unembed @ block ** depth @ embed
     mlp.jit()
     error = SquareError()
-
     return mlp, error
 
 def train(config):
@@ -155,6 +155,7 @@ config = Config(
     width = 32,
     depth = 4,
     linear = False,
+    residual = True,
     lipschitz_constant = 4,
     lr = 0.01,
     steps = 200,
