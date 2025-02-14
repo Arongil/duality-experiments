@@ -24,8 +24,10 @@ class Config:
     steps: int
     report_steps: int
     weight_decay: float
+    momentum: float
     lipschitz_constant: float
-    dualize: bool
+    dualize_pre: bool
+    dualize_post: bool
     project: bool
     ortho_backwards: bool
 
@@ -53,7 +55,9 @@ def train(config):
     steps = config.steps
     report_steps = config.report_steps
     weight_decay = config.weight_decay
-    dualize = config.dualize
+    momentum = config.momentum
+    dualize_pre = config.dualize_pre
+    dualize_post = config.dualize_post
     project = config.project
 
     losses = []
@@ -62,17 +66,20 @@ def train(config):
 
     print(f"Training with lr {lr:.4f} for {steps} steps")
 
+    m = [0 * weight for weight in w]
     for step in range(steps):
         outputs, activations = mlp(inputs, w)
         loss = error(outputs, targets)
         error_grad = error.grad(outputs, targets)
         grad_w, _ = mlp.backward(w, activations, error_grad)
-        d_w = mlp.dualize(grad_w) if dualize else grad_w
+        d_w = mlp.dualize(grad_w) if dualize_pre else grad_w
+        m = [momentum * m + (1-momentum) * d_weight for m, d_weight in zip(m, d_w)]
+        m = mlp.dualize(m) if dualize_post else m
 
         if weight_decay > 0:
             w = [weight * (1 - lr * weight_decay) for weight in w]
 
-        w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
+        w = [weight - lr * d_weight for weight, d_weight in zip(w, m)]
         
         if project:
             w = mlp.project(w)
@@ -143,9 +150,11 @@ config = Config(
     steps = 200,
     report_steps = 20,
     weight_decay = 0.00,
-    dualize = False,
+    momentum = 0.75,
+    dualize_pre = True,
+    dualize_post = True,
     project = False,
-    ortho_backwards = True
+    ortho_backwards = False,
 )
 
 lrs = jnp.logspace(-2, 0, 8)
@@ -172,4 +181,3 @@ plt.title('Loss by Learning Rate')
 plt.grid(True)
 plt.savefig('lr_sweep.png')
 plt.close()
-
