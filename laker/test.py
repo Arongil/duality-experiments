@@ -12,123 +12,164 @@ targets = jax.random.normal(key, (output_dim, batch_size))
 from modula.abstract import Identity, Mul
 from modula.atom import Linear
 from modula.bond import ReLU
-
-width = 32
-depth = 4
-lipschitz_constant = 4
-
-linear = False
-
-mlp = Linear(output_dim, width)
-for _ in range(depth):
-    if linear:
-        mlp @= Linear(width, width)
-    else:
-        mlp @= Linear(width, width) @ ReLU()
-mlp @= Linear(width, input_dim)
-mlp @= Mul(lipschitz_constant)
-
-print(mlp)
-
-mlp.jit()
-
 from modula.error import SquareError
+from dataclasses import dataclass
 
-error = SquareError()
+@dataclass
+class Config:
+    width: int
+    depth: int
+    linear: bool
+    lr: float
+    steps: int
+    report_steps: int
+    weight_decay: float
+    lipschitz_constant: float
+    dualize: bool
+    project: bool
+    ortho_backwards: bool
 
-from modula.atom import orthogonalize
+def create_mlp(config: Config):
+    width, depth, linear, ortho_backwards, lipschitz_constant = config.width, config.depth, config.linear, config.ortho_backwards, config.lipschitz_constant
+    mlp = Linear(output_dim, width, ortho_backwards=ortho_backwards)
+    for _ in range(depth):
+        if linear:
+            mlp @= Linear(width, width, ortho_backwards=ortho_backwards)
+        else:
+            mlp @= Linear(width, width, ortho_backwards=ortho_backwards) @ ReLU()
+    mlp @= Linear(width, input_dim, ortho_backwards=ortho_backwards)
+    mlp @= Mul(lipschitz_constant)
+    mlp.jit()
+    error = SquareError()
 
-steps = 200
-learning_rate = 0.5 / lipschitz_constant
-weight_decay = 0.00
+    return mlp, error
 
-report_steps = 20
-feature_learning = []
-weight_norms = []
+def train(config):
+    key = jax.random.PRNGKey(0)
+    mlp, error = create_mlp(config)
+    w = mlp.initialize(key)
 
-key = jax.random.PRNGKey(0)
-w = mlp.initialize(key)
+    lr = config.lr
+    steps = config.steps
+    report_steps = config.report_steps
+    weight_decay = config.weight_decay
+    dualize = config.dualize
+    project = config.project
 
-for step in range(steps):
-    # compute outputs and activations
-    outputs, activations = mlp(inputs, w)
-    
-    # compute loss
-    loss = error(outputs, targets)
-    
-    # compute error gradient
-    error_grad = error.grad(outputs, targets)
-    
-    # compute gradient of weights
-    grad_w, _ = mlp.backward(w, activations, error_grad)
-    
-    # dualize gradient
-    d_w = mlp.dualize(grad_w)
+    losses = []
+    feature_learning = []
+    weight_norms = []
 
-    # compute scheduled learning rate
-    lr = learning_rate# * (1 - step / steps)
+    print(f"Training with lr {lr:.4f} for {steps} steps")
 
-    # weight decay
-    # w = [weight * (1 - lr * weight_decay) for weight in w]
-    
-    # update weights
-    w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
+    for step in range(steps):
+        outputs, activations = mlp(inputs, w)
+        loss = error(outputs, targets)
+        error_grad = error.grad(outputs, targets)
+        grad_w, _ = mlp.backward(w, activations, error_grad)
+        d_w = mlp.dualize(grad_w) if dualize else grad_w
 
-    # orthogonalize weights
-    w = mlp.project(w)
+        if weight_decay > 0:
+            w = [weight * (1 - lr * weight_decay) for weight in w]
 
-    if step % report_steps == 0:
-        print(f"Step {step:3d} \t Loss {loss:.6f}")
-        #singular_values_d_w = [jnp.linalg.svd(d_weight, compute_uv=False) for d_weight in grad_w]
-        grad_norms = [jnp.linalg.norm(d_weight) for d_weight in grad_w]
-        feature_learning.append(grad_norms)
-        #feature_learning.append([s[0] for s in singular_values_d_w])
-        singular_values_w = [jnp.linalg.svd(wi, compute_uv=False) for wi in w]
-        weight_norms.append([(s[0], s[-1]) for s in singular_values_w])
+        w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
+        
+        if project:
+            w = mlp.project(w)
+
+        if step % report_steps == 0:
+            print(f"Step {step:3d} \t Loss {loss:.6f}")
+            losses.append(loss)
+            grad_norms = [jnp.linalg.norm(d_weight) for d_weight in grad_w]
+            feature_learning.append(grad_norms)
+            #singular_values_d_w = [jnp.linalg.svd(d_weight, compute_uv=False) for d_weight in grad_w]
+            #feature_learning.append([s[0] for s in singular_values_d_w])
+            singular_values_w = [jnp.linalg.svd(wi, compute_uv=False) for wi in w]
+            weight_norms.append([(s[0], s[-1]) for s in singular_values_w])
+            
+    return losses, feature_learning, weight_norms
 
 import matplotlib.pyplot as plt
-
-# Create gif of feature learning and weight norms over time
-fig, ax1 = plt.subplots(figsize=(10, 6))
-ax2 = ax1.twinx()
-feature_learning = jnp.array(feature_learning)
-weight_norms = jnp.array(weight_norms)
-
-def update(frame):
-    ax1.clear()
-    ax2.clear()
-    
-    # Plot feature learning on left y-axis (blue)
-    ax1.plot(range(len(w)), feature_learning[frame], '-o', color='blue')
-    ax1.set_xlabel('Layer Depth')
-    ax1.set_ylabel('Feature Learning Strength (Gradient Norm)', color='blue')
-    ax1.tick_params(axis='y', labelcolor='blue')
-    
-    # Plot weight matrix singular value ranges on right y-axis (red)
-    layer_indices = range(len(w))
-    max_singular_values = weight_norms[frame, :, 0]  # Largest singular values
-    min_singular_values = weight_norms[frame, :, 1]  # Smallest singular values
-    mean_singular_values = (max_singular_values + min_singular_values) / 2
-    singular_value_ranges = max_singular_values - min_singular_values
-    
-    ax2.errorbar(layer_indices, mean_singular_values, 
-                yerr=singular_value_ranges/2,  # Divide by 2 since errorbar expects symmetric errors
-                fmt='o', color='red', capsize=5, 
-                label='Singular Value Range')
-    ax2.set_ylabel('Weight Matrix Singular Values', color='red', rotation=270, labelpad=15)
-    ax2.tick_params(axis='y', labelcolor='red')
-    ax2.yaxis.set_label_position('right')
-    
-    plt.title(f'Learning Dynamics at Step {frame * report_steps}\n{"Linear" if linear else "ReLU"} Network, width {width}, depth {depth}')
-    ax1.grid(True)
-    
-    # Set consistent y-axis scales
-    ax1.set_ylim(0, feature_learning.max() * 1.1)
-    ax2.set_ylim(0, weight_norms[:, :, 0].max() * 1.1)  # Use max of largest singular values
-    plt.tight_layout()
-
 from matplotlib.animation import FuncAnimation
-anim = FuncAnimation(fig, update, frames=len(feature_learning), interval=200)
-anim.save('learning_dynamics.gif', writer='pillow')
+
+def plot_learning_dynamics(config, feature_learning, weight_norms, title_prefix=""):
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+    ax2 = ax1.twinx()
+    feature_learning = jnp.array(feature_learning)
+    weight_norms = jnp.array(weight_norms)
+    num_layers = feature_learning.shape[-1]
+
+    def update(frame):
+        ax1.clear()
+        ax2.clear()
+        
+        ax1.plot(range(num_layers), feature_learning[frame], '-o', color='blue')
+        ax1.set_xlabel('Layer Depth')
+        ax1.set_ylabel('Feature Learning Strength (Gradient Norm)', color='blue')
+        ax1.tick_params(axis='y', labelcolor='blue')
+        
+        layer_indices = range(num_layers)
+        max_singular_values = weight_norms[frame, :, 0]
+        min_singular_values = weight_norms[frame, :, 1]
+        mean_singular_values = (max_singular_values + min_singular_values) / 2
+        singular_value_ranges = max_singular_values - min_singular_values
+        
+        ax2.errorbar(layer_indices, mean_singular_values, 
+                    yerr=singular_value_ranges/2,
+                    fmt='o', color='red', capsize=5, 
+                    label='Singular Value Range')
+        ax2.set_ylabel('Weight Matrix Singular Values', color='red', rotation=270, labelpad=15)
+        ax2.tick_params(axis='y', labelcolor='red')
+        ax2.yaxis.set_label_position('right')
+        
+        plt.title(f'{title_prefix}Learning Dynamics at Step {frame * config.report_steps}\n{"Linear" if config.linear else "ReLU"} Network, width {config.width}, depth {config.depth}')
+        ax1.grid(True)
+        
+        ax1.set_ylim(0, feature_learning.max() * 1.1)
+        ax2.set_ylim(0, weight_norms[:, :, 0].max() * 1.1)
+        plt.tight_layout()
+
+    anim = FuncAnimation(fig, update, frames=len(feature_learning), interval=200)
+    return anim
+
+### SWEEP! ###
+
+config = Config(
+    width = 32,
+    depth = 4,
+    linear = False,
+    lipschitz_constant = 4,
+    lr = 0.01,
+    steps = 200,
+    report_steps = 20,
+    weight_decay = 0.00,
+    dualize = False,
+    project = False,
+    ortho_backwards = True
+)
+
+lrs = jnp.logspace(-2, 0, 8)
+final_losses = []
+
+for lr in lrs:
+    config.lr = lr
+    losses, fl, wn = train(config)
+    final_losses.append(losses[-1])
+    
+    # Save animation for this learning rate
+    #anim = plot_learning_dynamics(config, fl, wn, title_prefix=f"LR={lr:.1e} ")
+    #anim.save(f'learning_dynamics_lr_{lr:.1e}.gif', writer='pillow')
+    #plt.close()
+
+# Plot learning rate sweep results
+plt.figure(figsize=(10, 6))
+plt.semilogx(lrs, final_losses, '-o')
+plt.yscale('log')
+plt.ylim(1e-3, 1e0)
+plt.xlabel('Learning Rate')
+plt.ylabel('Final Training Loss')
+plt.title('Loss by Learning Rate')
+plt.grid(True)
+plt.savefig('lr_sweep.png')
 plt.close()
 

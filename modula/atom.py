@@ -19,7 +19,7 @@ def orthogonalize(M):
 
 
 class Linear(Atom):
-    def __init__(self, fanout, fanin):
+    def __init__(self, fanout, fanin, ortho_backwards=False):
         super().__init__()
         self.fanin  = fanin
         self.fanout = fanout
@@ -27,6 +27,7 @@ class Linear(Atom):
         self.mass = 1
         self.sensitivity = 1
         self.scale = (self.fanout / self.fanin) ** 0.5
+        self.ortho_backwards = ortho_backwards
 
     def forward(self, x, w):
         weights = w[0]
@@ -37,8 +38,10 @@ class Linear(Atom):
         input = acts[0]
         # idea 1: renormalize grad_input every time to be unit vector (it'll be dualized away anyway -- just to prevent gradients from deviating from unit norm)
         # idea 2: pretend like this linear layer is orthogonal when flowing gradient backwards
-        #grad_input = self.project([weights.T])[0] @ grad_output
-        grad_input = weights.T @ grad_output
+        if self.ortho_backwards:
+            grad_input = self.project([weights.T])[0] @ grad_output
+        else:
+            grad_input = weights.T @ grad_output
         grad_weight = grad_output @ input.T
         #print(f"grad_output: {grad_output.shape}")
         #print(f"weights: {weights.shape}, input: {input.shape}")
