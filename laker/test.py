@@ -72,14 +72,14 @@ def train(config):
         loss = error(outputs, targets)
         error_grad = error.grad(outputs, targets)
         grad_w, _ = mlp.backward(w, activations, error_grad)
-        d_w = mlp.dualize(grad_w) if dualize_pre else grad_w
-        m = [momentum * m + (1-momentum) * d_weight for m, d_weight in zip(m, d_w)]
-        m = mlp.dualize(m) if dualize_post else m
+        d_m = mlp.dualize(grad_w) if dualize_pre else grad_w
+        m = [momentum * m + (1-momentum) * d_m for m, d_m in zip(m, d_m)]
+        d_w = mlp.dualize(m) if dualize_post else m
+        w = [weight - lr * d_weight for weight, d_weight in zip(w, d_w)]
 
         if weight_decay > 0:
+            # this weight decay should really be applied before the weight update
             w = [weight * (1 - lr * weight_decay) for weight in w]
-
-        w = [weight - lr * d_weight for weight, d_weight in zip(w, m)]
         
         if project:
             w = mlp.project(w)
@@ -143,7 +143,7 @@ def plot_learning_dynamics(config, feature_learning, weight_norms, title_prefix=
 
 config = Config(
     width = 32,
-    depth = 4,
+    depth = 32,
     linear = False,
     lipschitz_constant = 4,
     lr = 0.01,
@@ -151,13 +151,13 @@ config = Config(
     report_steps = 20,
     weight_decay = 0.00,
     momentum = 0.75,
-    dualize_pre = True,
+    dualize_pre = False,
     dualize_post = True,
     project = False,
     ortho_backwards = False,
 )
 
-lrs = jnp.logspace(-2, 0, 8)
+lrs = jnp.logspace(-2, 0, 3)
 final_losses = []
 
 for lr in lrs:
@@ -166,9 +166,9 @@ for lr in lrs:
     final_losses.append(losses[-1])
     
     # Save animation for this learning rate
-    #anim = plot_learning_dynamics(config, fl, wn, title_prefix=f"LR={lr:.1e} ")
-    #anim.save(f'learning_dynamics_lr_{lr:.1e}.gif', writer='pillow')
-    #plt.close()
+    anim = plot_learning_dynamics(config, fl, wn, title_prefix=f"LR={lr:.1e} ")
+    anim.save(f'laker/plots/learning_dynamics_lr_{lr:.1e}.gif', writer='pillow')
+    plt.close()
 
 # Plot learning rate sweep results
 plt.figure(figsize=(10, 6))
@@ -179,5 +179,5 @@ plt.xlabel('Learning Rate')
 plt.ylabel('Final Training Loss')
 plt.title('Loss by Learning Rate')
 plt.grid(True)
-plt.savefig('lr_sweep.png')
+plt.savefig('laker/plots/lr_sweep.png')
 plt.close()
